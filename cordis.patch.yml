@@ -1,0 +1,5 @@
+- insert:
+    - id: plugin-manager
+      name: 'dsh-plugin-plugin-manager'
+    - id: ui-plugin-manager
+      name: 'dsh-plugin-plugin-manager/client'
