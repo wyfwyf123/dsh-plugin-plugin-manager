@@ -1,0 +1,125 @@
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
+import { pathToFileURL } from 'node:url';
+import { createServer } from 'node:http';
+import { test } from 'node:test';
+import { aliasFetchArgs, parseModelRoute, selectModelKey } from '../lib/routing.js';
+import { createUsageStore } from '../lib/usage.js';
+
+const keys = [
+  { id: 'fallback', models: [] },
+  { id: 'cheap', models: ['gpt-*', 'gpt-4o-0.05=gpt-4o'], limit: 10 },
+  { id: 'fast', models: ['gpt-4o-0.5=gpt-4o'], limit: 100 }
+];
+
+test('aliases select distinct Keys; exact routes win even within one Key', () => {
+  assert.deepEqual(selectModelKey(keys, 'gpt-4o-0.05'), { keyId: 'cheap', upstreamModel: 'gpt-4o' });
+  assert.deepEqual(selectModelKey(keys, 'gpt-4o-0.5'), { keyId: 'fast', upstreamModel: 'gpt-4o' });
+  assert.deepEqual(selectModelKey(keys, 'gpt-other'), { keyId: 'cheap', upstreamModel: 'gpt-other' });
+  assert.throws(() => selectModelKey(keys, 'gpt-4o-0.05', () => 10), /exhausted/);
+  assert.throws(() => selectModelKey(keys.map((k) => k.id === 'fast' ? { ...k, enabled: false } : k), 'gpt-4o-0.5'), /disabled/);
+  assert.throws(() => parseModelRoute('alias='), /Invalid/);
+  assert.throws(() => parseModelRoute('alias*=model'), /exact/);
+});
+
+test('both Request and URL init bodies map model without mutating inputs', async () => {
+  const context = { model: 'gpt-4o-0.5', upstreamModel: 'gpt-4o', baseURL: 'https://api.example/v1' };
+  for (const endpoint of ['chat/completions', 'responses', 'messages']) {
+    const init = { method: 'POST', headers: { 'content-type': 'application/json', 'content-length': '99' }, body: JSON.stringify({ model: context.model, messages: [] }) };
+    const url = `https://api.example/v1/${endpoint}`;
+    const [, mapped] = await aliasFetchArgs(url, init, context);
+    assert.equal(JSON.parse(mapped.body).model, 'gpt-4o');
+    assert.equal(JSON.parse(init.body).model, context.model);
+    assert.equal(mapped.headers.has('content-length'), false);
+    const request = new Request(url, init);
+    const [result] = await aliasFetchArgs(request, undefined, context);
+    assert.equal(JSON.parse(await result.text()).model, 'gpt-4o');
+    assert.equal(JSON.parse(await request.text()).model, context.model);
+    const [unrelated, sameInit] = await aliasFetchArgs('https://other.example/v1/responses', init, context);
+    assert.equal(unrelated, 'https://other.example/v1/responses');
+    assert.equal(sameInit, init);
+  }
+});
+
+test('Key spend survives persistence and resets independently', () => {
+  const store = createUsageStore({ now: () => 123 });
+  store.addKeySpend('p', 'cheap', 0.05);
+  store.addKeySpend('p', 'fast', 0.5);
+  const restored = createUsageStore();
+  restored.load(store.takeSnapshot());
+  assert.equal(restored.keySpends().find((x) => x.keyId === 'fast').spent, 0.5);
+  restored.resetKeySpend('p', 'cheap');
+  assert.equal(restored.keySpends().find((x) => x.keyId === 'cheap').spent, 0);
+  assert.equal(restored.keySpends().find((x) => x.keyId === 'fast').spent, 0.5);
+});
+
+test('plugin middleware sends concurrent aliases to local HTTP endpoint with isolated credentials', async () => {
+  // Resolve the plugin's existing dependencies without modifying node_modules.
+  const require = createRequire('C:/Users/汪云飞/.dsh/profiles/desktop/node_modules/dsh-model-manager/package.json');
+  let source = await readFile(new URL('../lib/index.js', import.meta.url), 'utf8');
+  for (const spec of ['undici', '@deepseek-ai/schemastery']) source = source.replace(`from "${spec}"`, `from ${JSON.stringify(pathToFileURL(require.resolve(spec)).href)}`);
+  for (const spec of ['./usage.js', './routing.js']) source = source.replace(`from "${spec}"`, `from ${JSON.stringify(new URL('../lib/' + spec.slice(2), import.meta.url).href)}`);
+  const { apply } = await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`);
+  const seen = [];
+  const server = createServer(async (req, res) => {
+    let body = '';
+    for await (const chunk of req) body += chunk;
+    seen.push({ body: JSON.parse(body), key: req.headers.authorization });
+    res.end('ok');
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const baseURL = `http://127.0.0.1:${server.address().port}/v1`;
+  const callbacks = new Map();
+  const cleanups = [];
+  const credentials = { async resolve(ref) { return { value: ref, source: 'test' }; } };
+  const originalResolve = credentials.resolve;
+  const originalFetch = globalThis.fetch;
+  const own = { providerKeys: { p: { keys } }, usagePrices: { 'p/gpt-4o-0.05': { input: 0.05, output: 0.1 }, 'p/gpt-4o-0.5': { input: 0.5, output: 1 } } };
+  let persisted;
+  const ctx = {
+    settings: { describe: () => [{ ns: 'model-manager', value: own }, { ns: 'llm-pi-ai', value: { providers: { p: { baseURL, api: 'openai-completions', apiKeyEnv: 'P_API_KEY', transport: 'sse' } } } }] },
+    get: (name) => name === 'credentials' ? credentials : undefined,
+    on: (name, listener) => callbacks.set(name, listener),
+    effect: (fn) => cleanups.push(fn()),
+    plugin: (plugin) => {
+      if (plugin.name === 'dsh-model-manager/usage-store') plugin.apply({
+        storageDomain: { async open() { return { global: { get: () => ({ version: 1, since: 0, days: {} }), set: (value) => { persisted = value; } }, close() {} }; } },
+        effect: (fn) => cleanups.push(fn())
+      });
+    }
+  };
+  try {
+    apply(ctx, own);
+    const middleware = callbacks.get('llm/stream');
+    async function call(model, asRequest) {
+      const options = Object.freeze({ provider: 'p', model });
+      const result = middleware(options, () => (async function* () {
+        const key = (await credentials.resolve('P_API_KEY')).value;
+        await new Promise((resolve) => setImmediate(resolve));
+        const init = { method: 'POST', headers: { 'content-type': 'application/json', authorization: key }, body: JSON.stringify({ model }) };
+        const url = `${baseURL}/chat/completions`;
+        const response = asRequest ? await fetch(new Request(url, init)) : await fetch(url, init);
+        assert.equal(await response.text(), 'ok');
+        yield { type: 'usage', usage: { inputTokens: 1000, outputTokens: 500 } };
+        yield { type: 'finish', reason: { kind: 'stop' } };
+      })());
+      for await (const chunk of result) assert.ok(chunk);
+    }
+    await Promise.all([call('gpt-4o-0.05', true), call('gpt-4o-0.5', false)]);
+    assert.equal(seen.length, 2);
+    assert.ok(seen.every((x) => x.body.model === 'gpt-4o'));
+    assert.deepEqual(seen.map((x) => x.key).sort(), ['MODEL_MANAGER_P_CHEAP_API_KEY', 'MODEL_MANAGER_P_FAST_API_KEY']);
+    assert.equal((await credentials.resolve('P_API_KEY')).value, 'P_API_KEY');
+  } finally {
+    for (const cleanup of cleanups.reverse()) await cleanup?.();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+  assert.equal(credentials.resolve, originalResolve);
+  assert.equal(globalThis.fetch, originalFetch);
+  assert.equal(persisted.keySpend[JSON.stringify(['p', 'cheap'])].spent, 0.0001);
+  assert.equal(persisted.keySpend[JSON.stringify(['p', 'fast'])].spent, 0.001);
+  const models = Object.keys(Object.values(persisted.days)[0]).map((k) => JSON.parse(k)[1]).sort();
+  assert.deepEqual(models, ['gpt-4o-0.05', 'gpt-4o-0.5']);
+});

@@ -1,0 +1,3 @@
+- insert:
+    - id: model-manager
+      name: 'dsh-model-manager'
