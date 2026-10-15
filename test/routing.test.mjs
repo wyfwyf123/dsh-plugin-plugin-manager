@@ -4,7 +4,7 @@ import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { createServer } from 'node:http';
 import { test } from 'node:test';
-import { aliasFetchArgs, parseModelRoute, selectModelKey } from '../lib/routing.js';
+import { aliasFetchArgs, aliasUpstream, parseModelRoute } from '../lib/routing.js';
 import { createUsageStore } from '../lib/usage.js';
 
 const keys = [
@@ -13,12 +13,19 @@ const keys = [
   { id: 'fast', models: ['gpt-4o-0.5=gpt-4o'], limit: 100 }
 ];
 
-test('aliases select distinct Keys; exact routes win even within one Key', () => {
-  assert.deepEqual(selectModelKey(keys, 'gpt-4o-0.05'), { keyId: 'cheap', upstreamModel: 'gpt-4o' });
-  assert.deepEqual(selectModelKey(keys, 'gpt-4o-0.5'), { keyId: 'fast', upstreamModel: 'gpt-4o' });
-  assert.deepEqual(selectModelKey(keys, 'gpt-other'), { keyId: 'cheap', upstreamModel: 'gpt-other' });
-  assert.throws(() => selectModelKey(keys, 'gpt-4o-0.05', () => 10), /exhausted/);
-  assert.throws(() => selectModelKey(keys.map((k) => k.id === 'fast' ? { ...k, enabled: false } : k), 'gpt-4o-0.5'), /disabled/);
+test('aliases map to the upstream model regardless of Key state (the 404 regression)', () => {
+  assert.equal(aliasUpstream(keys, 'gpt-4o-0.05'), 'gpt-4o');
+  assert.equal(aliasUpstream(keys, 'gpt-4o-0.5'), 'gpt-4o');
+  assert.equal(aliasUpstream(keys, 'gpt-other'), 'gpt-other');
+  assert.equal(aliasUpstream([], 'gpt-4o-0.05'), null);
+  // Exact aliases win over a wildcard on another group.
+  assert.equal(aliasUpstream([{ models: ['gpt-*'] }, { models: ['gpt-4o-0.05=gpt-4o'] }], 'gpt-4o-0.05'), 'gpt-4o');
+  // Disabled or exhausted groups must still rewrite: an alias that exists must
+  // never be sent upstream as its own model ID.
+  assert.equal(aliasUpstream(keys.map((k) => k.id === 'fast' ? { ...k, enabled: false, limit: 0 } : k), 'gpt-4o-0.5'), 'gpt-4o');
+  assert.equal(aliasUpstream(keys.map((k) => k.id === 'cheap' ? { ...k, limit: 0 } : k), 'gpt-4o-0.05'), 'gpt-4o');
+  // A malformed binding is skipped rather than breaking every request.
+  assert.equal(aliasUpstream([{ models: ['broken='] }, { models: ['gpt-4o-0.05=gpt-4o'] }], 'gpt-4o-0.05'), 'gpt-4o');
   assert.throws(() => parseModelRoute('alias='), /Invalid/);
   assert.throws(() => parseModelRoute('alias*=model'), /exact/);
 });
@@ -54,7 +61,7 @@ test('Key spend survives persistence and resets independently', () => {
   assert.equal(restored.keySpends().find((x) => x.keyId === 'fast').spent, 0.5);
 });
 
-test('plugin middleware sends concurrent aliases to local HTTP endpoint with isolated credentials', async () => {
+test('plugin middleware rewrites aliases and keeps the provider single credential', async () => {
   // Resolve the plugin's existing dependencies without modifying node_modules.
   const require = createRequire('C:/Users/汪云飞/.dsh/profiles/desktop/node_modules/dsh-model-manager/package.json');
   let source = await readFile(new URL('../lib/index.js', import.meta.url), 'utf8');
@@ -109,7 +116,8 @@ test('plugin middleware sends concurrent aliases to local HTTP endpoint with iso
     await Promise.all([call('gpt-4o-0.05', true), call('gpt-4o-0.5', false)]);
     assert.equal(seen.length, 2);
     assert.ok(seen.every((x) => x.body.model === 'gpt-4o'));
-    assert.deepEqual(seen.map((x) => x.key).sort(), ['MODEL_MANAGER_P_CHEAP_API_KEY', 'MODEL_MANAGER_P_FAST_API_KEY']);
+    // Multi-Key routing is retired: both concurrent calls use the provider's own key.
+    assert.deepEqual(seen.map((x) => x.key), ['P_API_KEY', 'P_API_KEY']);
     assert.equal((await credentials.resolve('P_API_KEY')).value, 'P_API_KEY');
   } finally {
     for (const cleanup of cleanups.reverse()) await cleanup?.();
@@ -118,8 +126,8 @@ test('plugin middleware sends concurrent aliases to local HTTP endpoint with iso
   }
   assert.equal(credentials.resolve, originalResolve);
   assert.equal(globalThis.fetch, originalFetch);
-  assert.equal(persisted.keySpend[JSON.stringify(['p', 'cheap'])].spent, 0.0001);
-  assert.equal(persisted.keySpend[JSON.stringify(['p', 'fast'])].spent, 0.001);
+  // No per-Key spend is accumulated any more, but daily usage still splits by alias.
+  assert.deepEqual(Object.keys(persisted.keySpend ?? {}), []);
   const models = Object.keys(Object.values(persisted.days)[0]).map((k) => JSON.parse(k)[1]).sort();
   assert.deepEqual(models, ['gpt-4o-0.05', 'gpt-4o-0.5']);
 });
