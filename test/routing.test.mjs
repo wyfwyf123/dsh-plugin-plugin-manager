@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { createServer } from 'node:http';
 import { test } from 'node:test';
 import { adaptiveFetchArgs, adaptiveThinkingBody, aliasFetchArgs, aliasUpstream, parseModelRoute } from '../lib/routing.js';
 import { createUsageStore } from '../lib/usage.js';
+import { resolveDep } from './deps.mjs';
 
 const keys = [
   { id: 'fallback', models: [] },
@@ -63,9 +63,8 @@ test('Key spend survives persistence and resets independently', () => {
 
 test('plugin middleware rewrites aliases and keeps the provider single credential', async () => {
   // Resolve the plugin's existing dependencies without modifying node_modules.
-  const require = createRequire('C:/Users/汪云飞/.dsh/profiles/desktop/node_modules/dsh-model-manager/package.json');
   let source = await readFile(new URL('../lib/index.js', import.meta.url), 'utf8');
-  for (const spec of ['undici', '@deepseek-ai/schemastery']) source = source.replace(`from "${spec}"`, `from ${JSON.stringify(pathToFileURL(require.resolve(spec)).href)}`);
+  for (const spec of ['undici', '@deepseek-ai/schemastery']) source = source.replace(`from "${spec}"`, `from ${JSON.stringify(pathToFileURL(resolveDep(spec)).href)}`);
   for (const spec of ['./usage.js', './routing.js']) source = source.replace(`from "${spec}"`, `from ${JSON.stringify(new URL('../lib/' + spec.slice(2), import.meta.url).href)}`);
   const { apply } = await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`);
   const seen = [];

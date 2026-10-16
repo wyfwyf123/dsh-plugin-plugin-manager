@@ -2,9 +2,9 @@
 
 DeepSeek Harness 的模型服务商管理插件。把服务商连接配置、模型目录、模型别名、推理强度、本地 HTTP 代理、快捷测试、故障切换、用量统计和费用估算集中到一个管理页面。
 
-当前版本：**0.16.0**
+当前版本：**0.16.1**
 
-> **0.16.0 变更：单价完全手动。** 单价表只显示你自己添加的模型，用量统计和测试调用都不会再自动加入需要填价的行。
+> **0.16.1 变更：单价完全手动。** 单价表只显示你自己添加的模型，用量统计和测试调用都不会再自动加入需要填价的行。
 >
 > **0.15.0 新增：图片输入默认值。** 内置常见模型能力表（Claude / GPT / DeepSeek-VL / GLM-V / Grok 等），服务商没上报模态信息时按模型名自动判定。
 >
@@ -142,7 +142,7 @@ Base URL：https://api.example.com/v1
 - 只对**你勾选的模型**生效；同服务商其它模型、其它服务商、OpenAI 协议的请求都不受影响
 - 只改写到该服务商自己的地址 + `/messages` 路径的 JSON 请求
 
-如果某个服务商自己已经会改写（例如 a6api 的 opus5.5 能直接用推理档位），那它本来就不需要这个开关——说明它的网关已经把老格式转好了。AIHUB / botcf 这类原样转发到上游的服务商才需要勾选。
+有些中转的网关自己就会把老格式转好，这类服务商不需要勾选；只有把请求原样转发给上游、由上游强制要求 adaptive 的中转才需要。
 
 > adaptive 目前是插件在请求发出前改写报文实现的；如果以后 DSH 适配器原生支持 `thinking.type=adaptive`，这个开关就可以不用了。
 
@@ -168,7 +168,7 @@ http://127.0.0.1:7890
 
 ## 安装和更新
 
-从 GitHub Release 下载 `dsh-model-manager-0.16.0.tgz`，通过 DSH 插件管理界面或对应 profile 的插件安装命令安装。
+从 GitHub Release 下载 `dsh-model-manager-0.16.1.tgz`，通过 DSH 插件管理界面或对应 profile 的插件安装命令安装。
 
 更新后需要手动重启 DSH 才能加载新的 Host 和 Web bundle。插件不会自动重启 DSH。
 
@@ -214,4 +214,4 @@ GitHub 仓库：
 
 当前 Release：
 
-<https://github.com/wyfwyf123/dsh-plugin-plugin-manager/releases/tag/v0.16.0>
+<https://github.com/wyfwyf123/dsh-plugin-plugin-manager/releases/tag/v0.16.1>
