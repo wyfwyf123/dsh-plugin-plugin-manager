@@ -4,7 +4,7 @@ import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { createServer } from 'node:http';
 import { test } from 'node:test';
-import { aliasFetchArgs, aliasUpstream, parseModelRoute } from '../lib/routing.js';
+import { adaptiveFetchArgs, adaptiveThinkingBody, aliasFetchArgs, aliasUpstream, parseModelRoute } from '../lib/routing.js';
 import { createUsageStore } from '../lib/usage.js';
 
 const keys = [
@@ -130,4 +130,52 @@ test('plugin middleware rewrites aliases and keeps the provider single credentia
   assert.deepEqual(Object.keys(persisted.keySpend ?? {}), []);
   const models = Object.keys(Object.values(persisted.days)[0]).map((k) => JSON.parse(k)[1]).sort();
   assert.deepEqual(models, ['gpt-4o-0.05', 'gpt-4o-0.5']);
+});
+
+test('adaptive thinking conversion matches the Claude adaptive wire format', () => {
+  // Classic payload → adaptive + output_config.effort (budget_tokens must go away).
+  const high = adaptiveThinkingBody({ model: 'm', max_tokens: 100, thinking: { type: 'enabled', budget_tokens: 16384 } }, 'high');
+  assert.deepEqual(high.thinking, { type: 'adaptive' });
+  assert.deepEqual(high.output_config, { effort: 'high' });
+  assert.equal('budget_tokens' in high.thinking, false);
+  assert.equal(high.max_tokens, 100);
+  // Level → effort mapping, including the extended levels.
+  assert.equal(adaptiveThinkingBody({ thinking: { type: 'enabled', budget_tokens: 1 } }, 'minimal').output_config.effort, 'low');
+  assert.equal(adaptiveThinkingBody({ thinking: { type: 'enabled', budget_tokens: 1 } }, 'xhigh').output_config.effort, 'high');
+  assert.equal(adaptiveThinkingBody({ thinking: { type: 'enabled', budget_tokens: 1 } }, 'max').output_config.effort, 'max');
+  // Existing output_config keys survive.
+  assert.equal(adaptiveThinkingBody({ output_config: { format: 'x' }, thinking: { type: 'enabled', budget_tokens: 1 } }, 'medium').output_config.format, 'x');
+  // "off" drops a legacy thinking block instead of sending one the provider rejects.
+  const off = adaptiveThinkingBody({ model: 'm', thinking: { type: 'enabled', budget_tokens: 1 } }, 'off');
+  assert.equal('thinking' in off, false);
+  assert.equal(adaptiveThinkingBody({ model: 'm' }, 'off'), null);
+  assert.equal(adaptiveThinkingBody({ model: 'm' }, undefined), null);
+  // Already-adaptive bodies just get the effort refreshed.
+  assert.equal(adaptiveThinkingBody({ thinking: { type: 'adaptive' }, output_config: { effort: 'low' } }, 'high').output_config.effort, 'high');
+});
+
+test('adaptive rewriting is limited to the opted-in provider Messages endpoint', async () => {
+  const context = { baseURL: 'https://relay.test/v1', adaptive: true, effort: 'high' };
+  const init = () => ({ method: 'POST', headers: { 'content-type': 'application/json', 'content-length': '9' }, body: JSON.stringify({ model: 'claude-opus-5-5', thinking: { type: 'enabled', budget_tokens: 8000 } }) });
+  const [, mapped] = await adaptiveFetchArgs('https://relay.test/v1/messages', init(), context);
+  assert.deepEqual(JSON.parse(mapped.body).thinking, { type: 'adaptive' });
+  assert.equal(JSON.parse(mapped.body).output_config.effort, 'high');
+  // A Request body is rewritten without mutating the original.
+  const original = new Request('https://relay.test/v1/messages', init());
+  const [rewritten] = await adaptiveFetchArgs(original, undefined, context);
+  assert.equal(JSON.parse(await rewritten.text()).thinking.type, 'adaptive');
+  assert.equal(JSON.parse(await original.text()).thinking.type, 'enabled');
+  // Everything else stays untouched: other paths, other hosts, non-opt-in providers.
+  const untouched = [
+    ['https://relay.test/v1/chat/completions', context],
+    ['https://other.test/v1/messages', context],
+    ['https://relay.test/v1/messages', { ...context, adaptive: false }],
+    ['https://relay.test/v1/messages', { ...context, baseURL: undefined }]
+  ];
+  for (const [url, ctx] of untouched) {
+    const [, same] = await adaptiveFetchArgs(url, init(), ctx);
+    assert.equal(JSON.parse(same.body).thinking.type, 'enabled', url);
+  }
+  const [, got] = await adaptiveFetchArgs('https://relay.test/v1/messages', { ...init(), method: 'GET' }, context);
+  assert.equal(JSON.parse(got.body).thinking.type, 'enabled');
 });

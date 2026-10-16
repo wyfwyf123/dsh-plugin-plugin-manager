@@ -2,10 +2,16 @@
 
 DeepSeek Harness 的模型服务商管理插件。把服务商连接配置、模型目录、模型别名、推理强度、本地 HTTP 代理、快捷测试、故障切换、用量统计和费用估算集中到一个管理页面。
 
-当前版本：**0.13.0**
+当前版本：**0.16.0**
 
 完整中文说明以 [README.md](README.md) 为准，本文是同一内容的精简版。
 
+> **0.16.0 变更：单价完全手动。** 单价表只显示你自己添加的模型，用量统计和测试调用都不会再自动加入需要填价的行。
+>
+> **0.15.0 新增：图片输入默认值。** 内置常见模型能力表（Claude / GPT / DeepSeek-VL / GLM-V / Grok / Gemini / Qwen-VL 等）。服务商没上报模态信息时，按模型名自动判定并默认勾选“支持图片输入”；服务商上报的信息和你手动保存的设置优先级更高。
+>
+> **0.14.0 新增：Anthropic adaptive thinking 支持。** 对 opus 5.5 这类只接受 `thinking.type=adaptive` 的模型，在模型管理里勾选“使用 adaptive thinking”即可保留推理档位（插件会把传统 thinking 改写成 adaptive + `output_config.effort`）。只对勾选的模型生效。
+>
 > **0.13.0 变更：多 API Key 路由已回退为单 Key。** 每个服务商重新只使用自己的一个密钥；按 Key 切换凭据、Key 额度、Key 暂停和“合并到已有服务商”都已移除。模型别名保留。
 
 ## 每个服务商一个密钥
@@ -35,16 +41,18 @@ DeepSeek Harness 的模型服务商管理插件。把服务商连接配置、模
 
 移除别名：点别名右侧 `×`，或点“移除分组”。两种方式都会同时删除对应的别名模型，避免留下发不出去的模型。
 
-## 单价：填写与删除
+## 单价：完全手动添加
+
+单价表里只会出现你自己添加过的模型；用量统计、测试调用、模型目录都不会自动塞条目。
 
 在“用量统计 → 单价（用于估算费用）”中：
 
-- **删除**：立即删除该模型单价，并把该行从列表移除（直接写入设置）
-- **显示已移除（n）**：重新显示已删除的行，每行可点“恢复显示”
+- **添加**：输入 `服务商/模型`（例如 `openai/gpt-4o`）后点“添加”，或从“从模型目录添加…”下拉里选
+- **移除**：把该行移出列表；已保存的单价会同时删除（直接写入设置）
 - **清空**：只清空编辑框内容，仍需点“保存单价”
-- **显示全部模型**：列出服务商目录中的模型，便于提前填写
+- 顶部搜索框只过滤已添加的行
 
-删除记录保存在 `usagePriceHidden`，即使模型之后继续被调用，该行也不会自动回来。
+测试调用（快捷测试 / 诊断 / 压测）不计入费用，也不会产生单价行。
 
 ## 推理强度
 
@@ -59,7 +67,7 @@ DeepSeek Harness 的模型服务商管理插件。把服务商连接配置、模
 
 ## 安装、更新和测试
 
-从 GitHub Release 下载 `dsh-model-manager-0.13.0.tgz` 安装。更新后需要手动重启 DSH。
+从 GitHub Release 下载 `dsh-model-manager-0.16.0.tgz` 安装。更新后需要手动重启 DSH。
 
 回归测试：
 
@@ -69,4 +77,4 @@ node --test --test-isolation=none test/*.test.mjs
 
 仓库：<https://github.com/wyfwyf123/dsh-plugin-plugin-manager>
 
-Release：<https://github.com/wyfwyf123/dsh-plugin-plugin-manager/releases/tag/v0.13.0>
+Release：<https://github.com/wyfwyf123/dsh-plugin-plugin-manager/releases/tag/v0.16.0>
