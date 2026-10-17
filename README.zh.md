@@ -2,11 +2,13 @@
 
 DeepSeek Harness 的模型服务商管理插件。把服务商连接配置、模型目录、模型别名、推理强度、本地 HTTP 代理、快捷测试、故障切换、用量统计和费用估算集中到一个管理页面。
 
-当前版本：**0.16.1**
+当前版本：**0.17.0**
 
 完整中文说明以 [README.md](README.md) 为准，本文是同一内容的精简版。
 
-> **0.16.1 变更：单价完全手动。** 单价表只显示你自己添加的模型，用量统计和测试调用都不会再自动加入需要填价的行。
+> **0.17.0 变更：适配 DeepSeek Harness 0.2。** DSH 0.2 把 `Agent` 收窄为 `{ id }`，会话头改挂在 live session 上；插件改为从 `ctx.sessions` 读取，恢复会话归属、子代理推理、按会话覆盖与故障切换作用域；同时移除 DSH 0.2 已删除的 `settings/updated` 监听。
+>
+> **0.16.0 变更：单价完全手动。** 单价表只显示你自己添加的模型，用量统计和测试调用都不会再自动加入需要填价的行。
 >
 > **0.15.0 新增：图片输入默认值。** 内置常见模型能力表（Claude / GPT / DeepSeek-VL / GLM-V / Grok / Gemini / Qwen-VL 等）。服务商没上报模态信息时，按模型名自动判定并默认勾选“支持图片输入”；服务商上报的信息和你手动保存的设置优先级更高。
 >
@@ -67,7 +69,7 @@ DeepSeek Harness 的模型服务商管理插件。把服务商连接配置、模
 
 ## 安装、更新和测试
 
-从 GitHub Release 下载 `dsh-model-manager-0.16.1.tgz` 安装。更新后需要手动重启 DSH。
+从 GitHub Release 下载 `dsh-model-manager-0.17.0.tgz` 安装。更新后需要手动重启 DSH。
 
 回归测试：
 
@@ -77,4 +79,4 @@ node --test --test-isolation=none test/*.test.mjs
 
 仓库：<https://github.com/wyfwyf123/dsh-plugin-plugin-manager>
 
-Release：<https://github.com/wyfwyf123/dsh-plugin-plugin-manager/releases/tag/v0.16.1>
+Release：<https://github.com/wyfwyf123/dsh-plugin-plugin-manager/releases/tag/v0.17.0>
