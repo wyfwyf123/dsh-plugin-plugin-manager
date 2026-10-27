@@ -27,6 +27,26 @@ test('price rows are exactly what the user added', async () => {
   assert.deepEqual(Array.from(priceRowKeys({ saved, draft, needle: 'nomatch' })), []);
 });
 
+test('provider filter and sorting work on the added rows', async () => {
+  const { priceRowKeys } = await loadPriceHelpers();
+  const priced = {
+    'a6api/deepseek-v4.1-flash': { mode: 'token', input: 0.2, output: 1 },
+    'areas/gpt-6.1-sol': { mode: 'token', input: 0.1, output: 0.5 },
+    'aihub/claude-opus-5-5': { mode: 'token', input: 0.64, output: 3.2 }
+  };
+  // Provider filter keeps only that provider's rows.
+  assert.deepEqual(Array.from(priceRowKeys({ saved: priced, draft: {}, provider: 'areas' })), ['areas/gpt-6.1-sol']);
+  assert.deepEqual(Array.from(priceRowKeys({ saved: priced, draft: {}, provider: 'nope' })), []);
+  // Sorting by input/output price, highest first.
+  assert.deepEqual(Array.from(priceRowKeys({ saved: priced, draft: {}, sort: 'input' })), ['aihub/claude-opus-5-5', 'a6api/deepseek-v4.1-flash', 'areas/gpt-6.1-sol']);
+  assert.deepEqual(Array.from(priceRowKeys({ saved: priced, draft: {}, sort: 'output' })), ['aihub/claude-opus-5-5', 'a6api/deepseek-v4.1-flash', 'areas/gpt-6.1-sol']);
+  // Provider grouping, and "recent" reverses insertion order.
+  assert.deepEqual(Array.from(priceRowKeys({ saved: priced, draft: {}, sort: 'provider' })), ['a6api/deepseek-v4.1-flash', 'aihub/claude-opus-5-5', 'areas/gpt-6.1-sol']);
+  assert.deepEqual(Array.from(priceRowKeys({ saved: priced, draft: {}, sort: 'recent' })), ['aihub/claude-opus-5-5', 'areas/gpt-6.1-sol', 'a6api/deepseek-v4.1-flash']);
+  // Filter and sort combine.
+  assert.deepEqual(Array.from(priceRowKeys({ saved: priced, draft: { 'a6api/gpt-5.5': {} }, provider: 'a6api', sort: 'name' })), ['a6api/deepseek-v4.1-flash', 'a6api/gpt-5.5']);
+});
+
 test('usage rows and the catalog never add a price row on their own', async () => {
   const { priceRowKeys } = await loadPriceHelpers();
   // Extra inputs are ignored: usage and catalog data cannot inject rows.

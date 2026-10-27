@@ -1,0 +1,5 @@
+# Keep the repository LF-only so Windows checkouts do not rewrite every line.
+* text=auto eol=lf
+*.tgz binary
+*.png binary
+*.ico binary
